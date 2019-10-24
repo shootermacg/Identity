@@ -1,0 +1,21 @@
+What is Identity Data
+- Identification: Username, password.
+- Personal Information: DoB, address etc.
+- what you are: Role in organisation, profession.
+
+Adding an Identity with an Int ID Key
+Startup.cs
+
+services.AddIdentity<User, Role>()
+.AddEntityFrameworkStores<ApplicationDbContext>()
+.AddDefaultTokenProviders();
+services.AddScoped<RoleManager<Role>>();
+Entites:
+
+public class User : IdentityUser<int>
+{
+}
+
+public class Role : IdentityRole<int>
+{
+}
