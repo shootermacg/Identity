@@ -1,0 +1,236 @@
+https://medium.com/@scottkuhl/extending-asp-net-core-2-2-identity-management-c3cc657cc448
+
+
+Microsoft gives you a really easy way to add users to your ASP.NET Core site. But there are two things I find myself changing right away: also asking for a user’s name and changing the user primary key from a string to an integer.
+Let’s start by talking about why I want to make these changes.
+First, I like to ask the user for either their first and last name, or a username. The default identity management templates rely heavily on email addresses only and not everyone is going to want to expose their email address to every other user on your site.
+Second, I like to change the primary key from a string to an integer to match the rest of my data model. I tend to prefer integers over GUIDs, but I don’t know anyone that relies on strings.
+I am assuming you already have a web application with user authentication enabled. You can set this up by selecting Individual User Accounts as the authentication type when creating your project. Or you can add it manually to an application by following these instructions.
+
+Individual User Accou
+Either way when you run your application you should have a working Login section.
+For this example I will be using Razor Pages. MVC is very similar.
+Add New Models
+Let’s start by adding two new models to our application. In your Models folders create a new class called AppRole that extends IdentityRole. This can be used to assign special roles to users like “admin”.
+using Microsoft.AspNetCore.Identity;
+ 
+namespace IdentityExample.Models
+{
+    public class AppRole : IdentityRole<int>
+    {
+        public AppRole() { }
+ 
+        public AppRole(string name)
+        {
+            Name = name;
+        }
+    }
+}
+And then add a AppUser class that extends IdentityUser so we can gather more data about them.
+using Microsoft.AspNetCore.Identity;
+using System.ComponentModel.DataAnnotations;
+ 
+namespace IdentityExample.Models
+{
+    public class AppUser : IdentityUser<int>
+    {
+        [PersonalData, Required, StringLength(20)]
+        public string FirstName { get; set; }
+ 
+        [PersonalData, Required, StringLength(20)]
+        public string LastName { get; set; }
+ 
+        public string FullName { get { return $"{FirstName} {LastName}"; } }
+    }
+}
+Both of these classes are marked with <int>. This tells Identity Management we want to use integer based primary keys.
+AppUser marks its properties with some standard data annotations to make the first and last name required with a max length of 20 characters. These properties are also marked with PersonalData, “so it’s automatically available for download and deletion. Making the data able to be downloaded and deleted helps meet GDPR requirements.”
+I also added a FullName property to consistently format a user’s name throughout the application.
+Update the Database Context
+The database context extends IdentityDbContext, we need to update it to tell it about our new classes and primary key strategy.
+public class ApplicationDbContext : IdentityDbContext<AppUser, AppRole, int>
+We also want to add or update or OnModelCreating to ignore the FullName property we added. It’s a computed property we don’t want to store in the database.
+protected override void OnModelCreating(ModelBuilder builder)
+{
+    base.OnModelCreating(builder);
+    builder.Entity<AppUser>().Ignore(e => e.FullName);
+}
+Update Startup
+Our Startup class is currently referencing the default identity. We need to update it to our custom identity.
+Before:
+services.AddDefaultIdentity<IdentityUser>()
+    .AddDefaultUI(UIFramework.Bootstrap4)
+    .AddEntityFrameworkStores<ApplicationDbContext>();
+After:
+services.AddIdentity<AppUser, AppRole>()
+    .AddDefaultUI(UIFramework.Bootstrap4)
+.AddEntityFrameworkStores<ApplicationDbContext>().AddDefaultTokenProviders();
+Update _LoginPartial.cshtml
+The login control in the toolbar also has references that need to be updated. (Don’t forget to add a using statement to your models folder here.)
+@using Microsoft.AspNetCore.Identity
+@using IdentityExample.Models
+@inject SignInManager<AppUser> SignInManager
+@inject UserManager<AppUser> UserManager
+And we are no longer going to show the user their email address. Instead let’s show them their name.
+Before:
+Hello @User.Identity.Name!
+After:
+@{ var user = await UserManager.GetUserAsync(User); }
+Hello @(user.FirstName)!
+Override Default Identity Pages
+Right click on the project name.
+Select Add > New Scaffolded Item.
+Select Identity on the left menu.
+Select Add.
+Choose Account/Manage/Index and Account/Register.
+Select your existing database context class.
+This will create new pages for user registration and the user profile page where we can ask for the first and last name.
+_ValidationScriptsPartial.cshtml
+Copy the HTML from your current file located in the Pages/Shared folder to the new one in the Areas/Identity/Pages folder to make sure that are the same.
+Register.cshtml.cs
+Add first and last name properties to the InputModel class.
+[Required, DataType(DataType.Text), Display(Name = "First Name")]
+public string FirstName { get; set; }
+ 
+[Required, DataType(DataType.Text), Display(Name = "Last Name")]
+public string LastName { get; set; }
+Add these property values to the user variable declaration in OnPostAsync
+var user = new AppUser { UserName = Input.Email, Email = Input.Email, FirstName = Input.FirstName, LastName = Input.LastName };
+Register.cshtml
+Add the input fields for first and last name just below the asp-validation-summary control.
+<div class="form-group">
+    <label asp-for="Input.FirstName"></label>
+    <input asp-for="Input.FirstName" class="form-control" />
+    <span asp-validation-for="Input.FirstName" class="text-danger"></span>
+</div>
+<div class="form-group">
+    <label asp-for="Input.LastName"></label>
+    <input asp-for="Input.LastName" class="form-control" />
+    <span asp-validation-for="Input.LastName" class="text-danger"></span>
+</div>
+Index.cshtml.cs
+This is the class in the Areas/Identity/Pages/Account/Manage folder.
+Add first and last name properties to the InputModel class again.
+[Required, DataType(DataType.Text), Display(Name = "First Name")]
+public string FirstName { get; set; }
+ 
+[Required, DataType(DataType.Text), Display(Name = "Last Name")]
+public string LastName { get; set; }
+Update the Input variable in OnGetAsync to populate these properties.
+Input = new InputModel
+{
+    Email = email,
+    PhoneNumber = phoneNumber,
+    FirstName = user.FirstName,
+    LastName = user.LastName
+};
+Save the properties in the OnPostAsync near the end of the method.
+if (Input.FirstName != user.FirstName) user.FirstName = Input.FirstName;
+if (Input.LastName != user.LastName) user.LastName = Input.LastName;
+await _userManager.UpdateAsync(user);
+ 
+await _signInManager.RefreshSignInAsync(user);
+StatusMessage = "Your profile has been updated";
+return RedirectToPage();
+Index.cshtml
+Add the input fields for first and last name just below the email input and above the phone number.
+<div class="form-group">
+    <label asp-for="Input.FirstName"></label>
+    <input asp-for="Input.FirstName" class="form-control" />
+    <span asp-validation-for="Input.FirstName" class="text-danger"></span>
+</div>
+<div class="form-group">
+    <label asp-for="Input.LastName"></label>
+    <input asp-for="Input.LastName" class="form-control" />
+    <span asp-validation-for="Input.LastName" class="text-danger"></span>
+</div>
+Update Migrations
+If you try to add a new migration it will fail because of the primary key change. The easy solution is to delete your migration folder and your database and then add a new migration.
+Package Manager Console Example:
+Add-Migration Initial -o Data\Migrations
+Update-Database
+Run your application and you should be able to register an account with a first and last name, see the user first name in the navigation bar and be able to update the first and last name.
+You can now use the AppUser.Id property in your own models to reference the user record like you would any other model.
+Seeding Test Data
+If you are seeding test data you can do so in your extension class like this:
+public static class ApplicationDbContextExtensions
+{
+    public static UserManager<AppUser> UserManager { get; set; }
+ 
+    public static void EnsureSeeded(this ApplicationDbContext context)
+    {
+        if (UserManager.FindByEmailAsync("scott@identity.local").GetAwaiter().GetResult() == null)
+        {
+            var user = new AppUser
+            {
+                FirstName = "Scott",
+                LastName = "Kuhl",
+                UserName = "scott@identity.local",
+                Email = "scott@idenity.local",
+                EmailConfirmed = true,
+                LockoutEnabled = false
+            };
+ 
+            UserManager.CreateAsync(user, "P@ssword1").GetAwaiter().GetResult();
+        }
+    }
+}
+In your Startup class’s ConfigureServices method below service.AddIdentity add the following:
+ApplicationDbContextExtensions.UserManager = services.BuildServiceProvider().GetService<UserManager<AppUser>>();
+Here is my Main method in my Program class that kicks off database seeding. Your implementation of database seeding may be different.
+public static void Main(string[] args)
+{
+    var host = CreateWebHostBuilder(args).Build();
+ 
+    using (var scope = host.Services.CreateScope())
+    {
+        var services = scope.ServiceProvider;
+        var dbContext =
+        services.GetRequiredService<ApplicationDbContext>();
+        dbContext.Database.Migrate();
+        dbContext.EnsureSeeded();
+    }
+ 
+    host.Run();
+}
+You should now have an identity model that does not expose the user’s email address so easily and let’s you add integer based primary key references to your model.
+You can download the complete working example here on GitHub.
+84
+Aspnetcore
+84 claps
+
+Scott Kuhl
+WRITTEN BY
+
+Scott Kuhl
+Follow
+See responses (5)
+More From Medium
+Related reads
+How to take advantage of Dependency Injection in .Net Core 2.2 + Console Applications
+Larry Schoeneman
+Larry Schoeneman in The Startup
+Apr 2 · 5 min read
+216
+Related reads
+How to deploy .NET Core Web API to Azure
+Fei Li
+Fei Li
+May 11 · 5 min read
+112
+Related reads
+Starting up with ASP.Net Core + Docker
+Mariano Rodriguez
+Mariano Rodriguez
+Apr 8 · 13 min read
+250
+Discover Medium
+Welcome to a place where words matter. On Medium, smart voices and original ideas take center stage - with no ads in sight. Watch
+Make Medium yours
+Follow all the topics you care about, and we’ll deliver the best stories for you to your homepage and inbox. Explore
+Become a member
+Get unlimited access to the best stories on Medium — and support writers while you’re at it. Just $5/month. Upgrade
+About
+Help
+Legal
+To make Medium work, we log user data. By using Medium, you agree to our Privacy Policy, including cookie policy.
